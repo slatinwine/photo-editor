@@ -1,0 +1,1526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>照片编辑</title>
+<style>
+:root{
+  --blue:#0A84FF; --red:#FF453A; --yellow:#FFD60A;
+  --bar:rgba(22,22,24,.92); --bar2:rgba(44,44,46,.72);
+  --sep:rgba(255,255,255,.14); --t2:rgba(235,235,245,.62); --t3:rgba(235,235,245,.35);
+  --radius:14px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  background:#000;color:#fff;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif;
+  -webkit-user-select:none;user-select:none;touch-action:manipulation;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;border:0;background:none;color:inherit;cursor:pointer}
+svg{display:block}
+#app{height:100vh;height:100dvh;display:flex;flex-direction:column;position:relative}
+
+/* ============ 顶部导航 ============ */
+#topbar{
+  display:none;align-items:center;gap:2px;
+  padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;
+  background:var(--bar);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);
+  border-bottom:.5px solid var(--sep);z-index:30;position:relative;
+}
+body.editing #topbar{display:flex}
+#topTitle{flex:1;text-align:center;font-size:16px;font-weight:600;line-height:1.15;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#topTitle small{display:block;font-size:10.5px;font-weight:400;color:var(--t3)}
+.tbtn{color:var(--blue);font-size:16.5px;padding:6px 10px;border-radius:10px;flex:none}
+.tbtn:active{opacity:.45}
+.tbtn:disabled{opacity:.28;pointer-events:none}
+.tbtn.icon{width:38px;height:38px;display:flex;align-items:center;justify-content:center;padding:0}
+.tbtn.done{font-weight:600}
+
+/* ============ 画布区 ============ */
+#stage{flex:1;min-height:0;position:relative;overflow:hidden;background:#000;touch-action:none;cursor:grab}
+#stage:active{cursor:grabbing}
+#wrap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);will-change:transform}
+#cv{display:block}
+#warmLayer{position:absolute;inset:0;pointer-events:none;mix-blend-mode:soft-light;opacity:0}
+#textLayer,#cropLayer{position:absolute;inset:0}
+#textLayer{pointer-events:none}
+#cropLayer{display:none;pointer-events:none}
+
+/* 文字对象 */
+.text-obj{position:absolute;pointer-events:auto;touch-action:none}
+.text-obj .t-body{white-space:pre;text-align:center;line-height:1.22}
+.text-obj.sel{outline:1.5px dashed rgba(255,255,255,.85);outline-offset:8px;border-radius:4px}
+.t-btn{position:absolute;width:34px;height:34px;border-radius:50%;background:rgba(28,28,30,.85);
+  backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;color:#fff;
+  box-shadow:0 2px 10px rgba(0,0,0,.5)}
+.text-obj.sel .t-btn{display:flex}
+.t-del{left:-42px;top:-16px}
+.t-resize{right:-42px;bottom:-16px}
+.t-btn:active{transform:scale(.9)}
+.text-obj{transform-origin:center}
+
+/* 裁剪层 */
+#cropBox{position:absolute;border:1.5px solid rgba(255,255,255,.95);pointer-events:auto;touch-action:none;cursor:move}
+.cs{position:absolute;background:rgba(0,0,0,.55);pointer-events:none}
+#cropBox .g{position:absolute;background:rgba(255,255,255,.4)}
+#cropBox .g.v{width:1px;height:100%;top:0}#cropBox .g.h{height:1px;width:100%;left:0}
+.ch{position:absolute;pointer-events:auto;touch-action:none}
+.ch.c{width:30px;height:30px}
+.ch.c::before{content:"";position:absolute;inset:0;border:0 solid #fff;border-width:0}
+.ch.nw{left:-2px;top:-2px}.ch.ne{right:-2px;top:-2px}.ch.sw{left:-2px;bottom:-2px}.ch.se{right:-2px;bottom:-2px}
+.ch.nw::before{border-left-width:3.5px;border-top-width:3.5px;border-top-left-radius:6px}
+.ch.ne::before{border-right-width:3.5px;border-top-width:3.5px;border-top-right-radius:6px}
+.ch.sw::before{border-left-width:3.5px;border-bottom-width:3.5px;border-bottom-left-radius:6px}
+.ch.se::before{border-right-width:3.5px;border-bottom-width:3.5px;border-bottom-right-radius:6px}
+.ch.e{right:-9px;top:20%;height:60%;width:20px;cursor:ew-resize}
+.ch.w{left:-9px;top:20%;height:60%;width:20px;cursor:ew-resize}
+.ch.n{top:-9px;left:20%;width:60%;height:20px;cursor:ns-resize}
+.ch.s{bottom:-9px;left:20%;width:60%;height:20px;cursor:ns-resize}
+
+/* 模式提示 */
+#hint{position:absolute;top:12px;left:50%;transform:translateX(-50%);display:none;
+  background:rgba(28,28,30,.8);backdrop-filter:blur(16px);padding:7px 14px;border-radius:20px;
+  font-size:12.5px;color:var(--t2);z-index:20;white-space:nowrap}
+
+/* ============ 底部 ============ */
+#bottombar{
+  background:var(--bar);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);
+  border-top:.5px solid var(--sep);
+  padding-bottom:env(safe-area-inset-bottom);z-index:30;position:relative;
+}
+#mainTools{display:flex}
+.tool{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:10px 0 12px;color:rgba(255,255,255,.92);font-size:10.5px;
+}
+.tool svg{width:25px;height:25px}
+.tool:active{opacity:.5}
+.tool.on{color:var(--blue)}
+
+.toolPanel{display:none;flex-direction:column;min-height:158px;padding:10px 14px 8px;gap:10px}
+.toolPanel.show{display:flex}
+.panelActions{display:flex;align-items:center;justify-content:space-between;margin-top:auto}
+.panelActions .mid{display:flex;gap:6px}
+.pbtn{width:44px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  color:#fff;background:rgba(120,120,128,.28)}
+.pbtn.primary{background:var(--blue)}
+.pbtn:active{opacity:.55}
+.pbtn svg{width:19px;height:19px}
+
+/* 分段控件 */
+.seg{display:flex;background:rgba(118,118,128,.24);border-radius:9px;padding:2px;gap:2px}
+.seg button{flex:1;padding:6px 4px;border-radius:7px;font-size:12.5px;color:#fff;white-space:nowrap}
+.seg button.on{background:rgba(99,99,102,.85);font-weight:600}
+.seg.scroll{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
+.seg.scroll::-webkit-scrollbar{display:none}
+.seg.scroll button{flex:0 0 auto;padding:6px 13px}
+
+/* 滑条行 */
+.sliderRow{display:flex;align-items:center;gap:12px}
+.sliderRow .val{width:44px;text-align:right;font-size:12.5px;color:var(--t2);font-variant-numeric:tabular-nums}
+input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:28px;background:transparent}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(255,255,255,.28)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.5);margin-top:-11px}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(255,255,255,.28)}
+input[type=range]::-moz-range-thumb{width:26px;height:26px;border:0;border-radius:50%;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.5)}
+
+/* 颜色点 */
+.dots{display:flex;gap:14px;align-items:center;justify-content:center;padding:2px 0}
+.dot{width:27px;height:27px;border-radius:50%;border:2px solid rgba(255,255,255,.25);flex:none}
+.dot.on{border-color:#fff;transform:scale(1.15);box-shadow:0 0 0 2px rgba(0,0,0,.6) inset}
+.dot:active{transform:scale(.9)}
+
+/* 调整横滑项 */
+.hscroll{display:flex;gap:18px;overflow-x:auto;padding:6px 8px 2px;scrollbar-width:none;justify-content:flex-start}
+.hscroll::-webkit-scrollbar{display:none}
+.hitem{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10.5px;color:var(--t2);flex:none;min-width:44px}
+.hitem svg{width:26px;height:26px}
+.hitem.on{color:var(--blue)}
+.hitem:active{opacity:.6}
+
+/* 滤镜缩略 */
+.thumbs{display:flex;gap:12px;overflow-x:auto;padding:8px 10px 4px;scrollbar-width:none}
+.thumbs::-webkit-scrollbar{display:none}
+.thumb{flex:none;width:64px;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10.5px;color:var(--t2)}
+.thumb .im{position:relative;width:64px;height:64px;border-radius:10px;overflow:hidden;background:#222}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb .tt{position:absolute;inset:0;mix-blend-mode:soft-light;pointer-events:none}
+.thumb.on .im{outline:2.5px solid var(--blue);outline-offset:1px}
+.thumb.on{color:#fff}
+.thumb:active .im{opacity:.7}
+
+/* ============ 欢迎页 ============ */
+#welcome{position:absolute;inset:0;z-index:40;background:#000;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:0;padding:24px;text-align:center}
+#welcome.hide{display:none}
+#welcome .logo{width:86px;height:86px;border-radius:22px;
+  background:linear-gradient(145deg,#3aa0ff,#0A5CFF 55%,#7a3cff);
+  display:flex;align-items:center;justify-content:center;box-shadow:0 14px 44px rgba(10,90,255,.4);margin-bottom:22px}
+#welcome .logo svg{width:44px;height:44px;color:#fff}
+#welcome h1{font-size:26px;font-weight:700;letter-spacing:.5px;margin-bottom:8px}
+#welcome p{font-size:14px;color:var(--t2);margin-bottom:34px;max-width:280px;line-height:1.5}
+.dropZone{width:min(84vw,320px);border:1.5px dashed rgba(255,255,255,.3);border-radius:18px;
+  padding:26px 18px;display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--t2);
+  font-size:13px;transition:.2s;margin-bottom:18px}
+.dropZone.over{border-color:var(--blue);background:rgba(10,132,255,.08);color:var(--blue)}
+.bigBtn{width:min(84vw,320px);padding:15px;border-radius:15px;font-size:16.5px;font-weight:600;
+  background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;gap:8px}
+.bigBtn:active{opacity:.75}
+.ghostBtn{width:min(84vw,320px);padding:13px;border-radius:15px;font-size:15px;background:rgba(120,120,128,.22);color:#fff}
+.ghostBtn:active{opacity:.6}
+#welcome .feat{display:flex;gap:26px;margin-top:30px;color:var(--t3);font-size:11px}
+#welcome .feat span{display:flex;flex-direction:column;align-items:center;gap:6px}
+#welcome .feat svg{width:21px;height:21px;color:var(--t2)}
+
+/* ============ Sheet / Alert / Toast ============ */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;opacity:0;visibility:hidden;transition:.3s}
+.mask.show{opacity:1;visibility:visible}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:61;transform:translateY(105%);
+  transition:transform .38s cubic-bezier(.32,.72,0,1);
+  padding:0 10px calc(env(safe-area-inset-bottom) + 10px)}
+.sheet.show{transform:translateY(0)}
+.sheet .grp{border-radius:14px;overflow:hidden;background:rgba(37,37,40,.94);
+  backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}
+.sheet .grp+.grp{margin-top:9px}
+.sheet button.si{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;
+  padding:16px;font-size:17px;color:#fff;position:relative}
+.sheet button.si:active{background:rgba(255,255,255,.08)}
+.sheet button.si+.si::before{content:"";position:absolute;top:0;left:0;right:0;height:.5px;background:var(--sep)}
+.sheet button.si.destructive{color:var(--red)}
+.sheet button.si svg{width:19px;height:19px}
+.sheet .cancel{margin-top:9px;background:rgba(37,37,40,.94);border-radius:14px;font-weight:600}
+.sheet .cancel button{width:100%;padding:16px;font-size:17px}
+
+#textSheet{position:fixed;left:0;right:0;bottom:0;z-index:62;transform:translateY(105%);
+  transition:transform .38s cubic-bezier(.32,.72,0,1);
+  background:rgba(30,30,32,.97);backdrop-filter:blur(28px);border-radius:20px 20px 0 0;
+  padding:14px 16px calc(env(safe-area-inset-bottom) + 14px);display:flex;flex-direction:column;gap:12px}
+#textSheet.show{transform:translateY(0)}
+#textSheet::before{content:"";width:38px;height:5px;border-radius:3px;
+  background:rgba(255,255,255,.28);margin:0 auto 2px}
+#textSheet header{display:flex;align-items:center;justify-content:space-between}
+#textSheet header b{font-size:16px}
+#textSheet header .tbtn{padding:4px 8px}
+#tInput{width:100%;min-height:84px;background:rgba(120,120,128,.22);border:0;border-radius:12px;
+  color:#fff;font-size:17px;padding:12px 14px;resize:none;outline:none;font-family:inherit;
+  -webkit-user-select:text;user-select:text}
+#tInput::placeholder{color:var(--t3)}
+.trow{display:flex;align-items:center;gap:10px;overflow-x:auto;scrollbar-width:none;padding:2px}
+.trow::-webkit-scrollbar{display:none}
+.trow .lbl{font-size:12.5px;color:var(--t2);flex:none}
+.fontChip{flex:none;padding:8px 16px;border-radius:11px;background:rgba(120,120,128,.24);font-size:15px;color:#fff;border:1.5px solid transparent}
+.fontChip.on{border-color:var(--blue)}
+.toggleRow{display:flex;align-items:center;justify-content:space-between;font-size:14px;color:var(--t2)}
+.switch{position:relative;width:51px;height:31px;border-radius:16px;background:rgba(120,120,128,.32);transition:.25s;flex:none}
+.switch.on{background:#30D158}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;
+  background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.3);transition:.25s}
+.switch.on::after{left:22px}
+
+#alertBox{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.4)}
+#alertBox.show{display:flex}
+#alertBox .card{width:280px;border-radius:16px;overflow:hidden;background:rgba(42,42,44,.96);
+  backdrop-filter:blur(24px);text-align:center;animation:pop .22s cubic-bezier(.2,1.4,.4,1)}
+@keyframes pop{from{transform:scale(1.12);opacity:0}}
+#alertBox .card .tt{padding:19px 18px 4px;font-size:16.5px;font-weight:600}
+#alertBox .card .msg{padding:4px 18px 18px;font-size:13.5px;color:var(--t2);line-height:1.45}
+#alertBox .card button{display:block;width:100%;padding:13px;font-size:16.5px;color:var(--blue);position:relative}
+#alertBox .card button+button::before{content:"";position:absolute;top:0;left:0;right:0;height:.5px;background:var(--sep)}
+#alertBox .card button.dg{color:var(--red);font-weight:600}
+#alertBox .card button:active{background:rgba(255,255,255,.08)}
+
+#toast{position:fixed;top:calc(env(safe-area-inset-top) + 58px);left:50%;transform:translate(-50%,-16px);
+  background:rgba(44,44,46,.92);backdrop-filter:blur(20px);padding:9px 18px;border-radius:22px;
+  font-size:13.5px;z-index:80;opacity:0;transition:.3s;pointer-events:none;white-space:nowrap;max-width:86vw;
+  overflow:hidden;text-overflow:ellipsis}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+
+#busy{position:fixed;inset:0;z-index:75;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35)}
+#busy.show{display:flex}
+.spin{width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;
+  animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+@media (min-width:700px){
+  .tool{padding:11px 0 13px}
+  #mainTools{max-width:560px;margin:0 auto}
+  .toolPanel{max-width:640px;margin:0 auto;width:100%}
+}
+</style>
+</head>
+<body class="fit">
+
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <symbol id="i-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="4.5"/><circle cx="9" cy="9" r="1.9"/>
+      <path d="M4 17.5 9.2 12.6l4.2 3.9 2.8-2.6L20.5 17.5"/>
+    </symbol>
+    <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="4.5"/><circle cx="9" cy="9" r="1.9"/>
+      <path d="M4 17.5 9.2 12.6l4.2 3.9 2.8-2.6L20.5 17.5"/>
+    </symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8.5 4.5 4 9l4.5 4.5"/><path d="M4 9h10.2a5.4 5.4 0 0 1 0 10.8H9"/>
+    </symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15.5 4.5 20 9l-4.5 4.5"/><path d="M20 9H9.8a5.4 5.4 0 0 0 0 10.8H15"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.5 12.5 9.5 17.5 19.5 6.5"/>
+    </symbol>
+    <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M6 6 18 18M18 6 6 18"/>
+    </symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+      <circle cx="12" cy="9" r="5"/><circle cx="9" cy="14.6" r="5"/><circle cx="15" cy="14.6" r="5"/>
+    </symbol>
+    <symbol id="i-adjust" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+      <path d="M3 7h18M3 12h18M3 17h18"/>
+      <circle cx="9" cy="7" r="2.4" fill="#000"/><circle cx="15" cy="12" r="2.4" fill="#000"/><circle cx="7.5" cy="17" r="2.4" fill="#000"/>
+    </symbol>
+    <symbol id="i-crop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7.5 2.5v14h14"/><path d="M2.5 7.5h14v14"/>
+    </symbol>
+    <symbol id="i-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 6.2V4.5h14v1.7M12 4.5V19.5M9 19.5h6"/>
+    </symbol>
+    <symbol id="i-brush" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M19.4 4.6a2.4 2.4 0 0 0-3.4 0L8.6 12l3.4 3.4 7.4-7.4a2.4 2.4 0 0 0 0-3.4Z"/>
+      <path d="M8.6 12c-2.8.4-4.1 2.4-4.1 5.4 0 1.1-1 1.9-1.9 2.1 1.2 1.1 3 1.6 4.6 1.6 2.6 0 4.9-1.6 5.4-4.3"/>
+    </symbol>
+    <symbol id="i-retouch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="14.5" y="4" width="5.5" height="5.5" rx="1.4"/>
+      <rect x="4" y="15" width="5.5" height="5.5" rx="1.4"/><rect x="13" y="13" width="7" height="7" rx="1.6"/>
+    </symbol>
+    <symbol id="i-rotl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.5 9.5a8 8 0 1 1-1 5"/><path d="M4 4.5v5h5"/>
+    </symbol>
+    <symbol id="i-rotr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M19.5 9.5a8 8 0 1 0 1 5"/><path d="M20 4.5v5h-5"/>
+    </symbol>
+    <symbol id="i-fliph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3v18" stroke-dasharray="2.6 3"/><path d="M8.5 6.5v11L2.8 12Z"/><path d="M15.5 6.5v11L21.2 12Z"/>
+    </symbol>
+    <symbol id="i-flipv" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12h18" stroke-dasharray="2.6 3"/><path d="M6.5 8.5h11L12 2.8Z"/><path d="M6.5 15.5h11L12 21.2Z"/>
+    </symbol>
+    <symbol id="i-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3.5v11.5M7 10.5l5 5 5-5M4.5 20.5h15"/>
+    </symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+      <rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 4H6a2.5 2.5 0 0 0-2.5 2.5V17"/>
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 6.5h16M9.5 3.5h5M6.5 6.5l1 14h9l1-14M10 10.5v6.5M14 10.5v6.5"/>
+    </symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15.8 4.7a2.3 2.3 0 0 1 3.3 3.3L8 19.2l-4.4 1.2L4.8 16Z"/>
+    </symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.5 10a8 8 0 1 1 0 4"/><path d="M4.5 5.5v4.5H9"/>
+    </symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+      <circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5 5l1.8 1.8M17.2 17.2 19 19M19 5l-1.8 1.8M6.8 17.2 5 19"/>
+    </symbol>
+    <symbol id="i-contrast" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+      <circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17A8.5 8.5 0 0 0 12 3.5Z" fill="currentColor" stroke="none"/>
+    </symbol>
+    <symbol id="i-drop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+      <path d="M12 3.2s6.5 7 6.5 11.3a6.5 6.5 0 0 1-13 0C5.5 10.2 12 3.2 12 3.2Z"/>
+    </symbol>
+    <symbol id="i-temp" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+      <path d="M10 4a2 2 0 0 1 4 0v9.3a4.5 4.5 0 1 1-4 0Z"/><circle cx="12" cy="17.3" r="1.9" fill="currentColor" stroke="none"/>
+    </symbol>
+    <symbol id="i-resize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M19.5 19.5 9 9M19.5 13.5v6h-6M14 19.5h5.5V14"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div id="app">
+
+  <!-- 欢迎页 -->
+  <div id="welcome">
+    <div class="logo"><svg><use href="#i-logo"/></svg></div>
+    <h1>照片编辑</h1>
+    <p>导入一张照片，开始修图。所有处理均在本地完成，不会上传。</p>
+    <div class="dropZone" id="dropZone">
+      <svg width="30" height="30" style="color:var(--t2)"><use href="#i-image"/></svg>
+      <span>拖放图片到此处，或点按选择</span>
+    </div>
+    <button class="bigBtn" id="btnPick"><svg width="20" height="20"><use href="#i-image"/></svg>选择照片</button>
+    <button class="ghostBtn" id="btnSample" style="margin-top:11px">使用示例图片</button>
+    <div class="feat">
+      <span><svg><use href="#i-text"/></svg>加文字</span>
+      <span><svg><use href="#i-retouch"/></svg>消除/马赛克</span>
+      <span><svg><use href="#i-filter"/></svg>滤镜调色</span>
+      <span><svg><use href="#i-down"/></svg>导出</span>
+    </div>
+  </div>
+
+  <!-- 顶部 -->
+  <header id="topbar">
+    <button class="tbtn" id="btnRevert">还原</button>
+    <div id="topTitle">照片<small id="imgMeta"></small></div>
+    <button class="tbtn icon" id="btnUndo" disabled><svg><use href="#i-undo"/></svg></button>
+    <button class="tbtn icon" id="btnRedo" disabled><svg><use href="#i-redo"/></svg></button>
+    <button class="tbtn done" id="btnDone">完成</button>
+  </header>
+
+  <!-- 画布 -->
+  <main id="stage">
+    <div id="wrap">
+      <canvas id="cv" width="10" height="10"></canvas>
+      <div id="warmLayer"></div>
+      <div id="textLayer"></div>
+      <div id="cropLayer">
+        <div class="cs" id="csT"></div><div class="cs" id="csB"></div>
+        <div class="cs" id="csL"></div><div class="cs" id="csR"></div>
+        <div id="cropBox">
+          <div class="g v" style="left:33.33%"></div><div class="g v" style="left:66.66%"></div>
+          <div class="g h" style="top:33.33%"></div><div class="g h" style="top:66.66%"></div>
+          <div class="ch c nw" data-h="nw"></div><div class="ch c ne" data-h="ne"></div>
+          <div class="ch c sw" data-h="sw"></div><div class="ch c se" data-h="se"></div>
+          <div class="ch n" data-h="n"></div><div class="ch s" data-h="s"></div>
+          <div class="ch w" data-h="w"></div><div class="ch e" data-h="e"></div>
+        </div>
+      </div>
+    </div>
+    <div id="hint"></div>
+  </main>
+
+  <!-- 底部 -->
+  <footer id="bottombar">
+    <div id="mainTools">
+      <button class="tool" data-mode="filter"><svg><use href="#i-filter"/></svg>滤镜</button>
+      <button class="tool" data-mode="adjust"><svg><use href="#i-adjust"/></svg>调整</button>
+      <button class="tool" data-mode="crop"><svg><use href="#i-crop"/></svg>裁剪</button>
+      <button class="tool" data-mode="text"><svg><use href="#i-text"/></svg>文字</button>
+      <button class="tool" data-mode="brush"><svg><use href="#i-brush"/></svg>画笔</button>
+      <button class="tool" data-mode="retouch"><svg><use href="#i-retouch"/></svg>消除</button>
+    </div>
+
+    <!-- 画笔 -->
+    <div class="toolPanel" id="pBrush">
+      <div class="dots" id="brushDots"></div>
+      <div class="sliderRow"><input type="range" id="brushSize" min="1" max="100" value="45"><span class="val" id="brushSizeVal"></span></div>
+      <div class="panelActions">
+        <div class="mid"><button class="pbtn" data-exit><svg><use href="#i-close"/></svg></button></div>
+        <div style="font-size:12px;color:var(--t3)">在照片上涂抹</div>
+        <button class="pbtn primary" data-exit><svg><use href="#i-check"/></svg></button>
+      </div>
+    </div>
+
+    <!-- 消除/涂改 -->
+    <div class="toolPanel" id="pRetouch">
+      <div class="seg" id="retouchSeg">
+        <button data-t="mosaic" class="on">马赛克</button>
+        <button data-t="blur">模糊</button>
+        <button data-t="eraser">消除</button>
+      </div>
+      <div class="sliderRow"><input type="range" id="retouchSize" min="1" max="100" value="50"><span class="val" id="retouchSizeVal"></span></div>
+      <div class="panelActions">
+        <div class="mid"><button class="pbtn" data-exit><svg><use href="#i-close"/></svg></button></div>
+        <div style="font-size:12px;color:var(--t3);text-align:center" id="retouchTip">涂抹以遮挡</div>
+        <button class="pbtn primary" data-exit><svg><use href="#i-check"/></svg></button>
+      </div>
+    </div>
+
+    <!-- 文字 -->
+    <div class="toolPanel" id="pText">
+      <div id="textCtlEmpty" style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:13px;color:var(--t2);text-align:center;padding:8px 0 2px">点按照片上的任意位置添加文字</div>
+      </div>
+      <div id="textCtlSel" style="display:none;flex-direction:column;gap:10px">
+        <div class="dots" id="textDots"></div>
+        <div class="trow">
+          <span class="lbl">字体</span>
+          <button class="fontChip on" data-f="0" style="font-family:-apple-system,'PingFang SC',sans-serif">默认</button>
+          <button class="fontChip" data-f="1" style="font-family:Georgia,'Songti SC','SimSun',serif">衬线</button>
+          <button class="fontChip" data-f="2" style="font-family:'Yuanti SC','YouYuan','Comic Sans MS',cursive">圆润</button>
+          <button class="fontChip" data-f="3" style="font-family:'Xingkai SC','KaiTi','STKaiti',serif">手写</button>
+        </div>
+        <div class="toggleRow"><span>文字描边</span><div class="switch" id="textStroke"></div></div>
+      </div>
+      <div class="panelActions">
+        <div class="mid" id="textMidBtns" style="display:none">
+          <button class="pbtn" id="btnTextEdit"><svg><use href="#i-edit"/></svg></button>
+          <button class="pbtn" id="btnTextDel"><svg><use href="#i-trash"/></svg></button>
+        </div>
+        <div style="flex:1"></div>
+        <button class="pbtn primary" data-exit><svg><use href="#i-check"/></svg></button>
+      </div>
+    </div>
+
+    <!-- 裁剪 -->
+    <div class="toolPanel" id="pCrop">
+      <div class="seg scroll" id="cropSeg">
+        <button data-r="0" class="on">自由</button>
+        <button data-r="1">1:1</button>
+        <button data-r="1.3333">4:3</button>
+        <button data-r="0.75">3:4</button>
+        <button data-r="1.7778">16:9</button>
+        <button data-r="0.5625">9:16</button>
+      </div>
+      <div class="hscroll" id="cropOps">
+        <button class="hitem" data-op="rotl"><svg><use href="#i-rotl"/></svg>左旋</button>
+        <button class="hitem" data-op="rotr"><svg><use href="#i-rotr"/></svg>右旋</button>
+        <button class="hitem" data-op="fliph"><svg><use href="#i-fliph"/></svg>水平</button>
+        <button class="hitem" data-op="flipv"><svg><use href="#i-flipv"/></svg>垂直</button>
+      </div>
+      <div class="panelActions">
+        <button class="pbtn" data-cancelcrop><svg><use href="#i-close"/></svg></button>
+        <div style="font-size:12px;color:var(--t3)">拖动边角调整范围</div>
+        <button class="pbtn primary" data-applycrop><svg><use href="#i-check"/></svg></button>
+      </div>
+    </div>
+
+    <!-- 调整 -->
+    <div class="toolPanel" id="pAdjust">
+      <div class="sliderRow">
+        <input type="range" id="adjSlider" min="-100" max="100" value="0">
+        <span class="val" id="adjVal">0</span>
+      </div>
+      <div class="hscroll" id="adjItems">
+        <button class="hitem on" data-k="b"><svg><use href="#i-sun"/></svg>亮度</button>
+        <button class="hitem" data-k="c"><svg><use href="#i-contrast"/></svg>对比度</button>
+        <button class="hitem" data-k="s"><svg><use href="#i-drop"/></svg>饱和度</button>
+        <button class="hitem" data-k="w"><svg><use href="#i-temp"/></svg>色温</button>
+      </div>
+      <div class="panelActions">
+        <button class="pbtn" data-canceladj><svg><use href="#i-close"/></svg></button>
+        <div class="mid"><button class="pbtn" id="btnAdjReset"><svg><use href="#i-reset"/></svg></button></div>
+        <button class="pbtn primary" data-applyadj><svg><use href="#i-check"/></svg></button>
+      </div>
+    </div>
+
+    <!-- 滤镜 -->
+    <div class="toolPanel" id="pFilter">
+      <div class="thumbs" id="filterThumbs"></div>
+      <div class="panelActions" style="margin-top:2px">
+        <button class="pbtn" data-cancelfilter><svg><use href="#i-close"/></svg></button>
+        <div style="font-size:12px;color:var(--t3)">点按预览效果</div>
+        <button class="pbtn primary" data-applyfilter><svg><use href="#i-check"/></svg></button>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- 导出 Sheet -->
+<div class="mask" id="exportMask"></div>
+<div class="sheet" id="exportSheet">
+  <div class="grp">
+    <button class="si" id="expPng"><svg><use href="#i-down"/></svg>存储为 PNG</button>
+    <button class="si" id="expJpg"><svg><use href="#i-down"/></svg>存储为 JPEG</button>
+    <button class="si" id="expCopy" style="display:none"><svg><use href="#i-copy"/></svg>拷贝到剪贴板</button>
+  </div>
+  <div class="grp cancel"><button id="expCancel">取消</button></div>
+</div>
+
+<!-- 文字输入 Sheet -->
+<div id="textSheet">
+  <header>
+    <button class="tbtn" id="tsCancel">取消</button>
+    <b>文本</b>
+    <button class="tbtn" id="tsDone" style="font-weight:600">完成</button>
+  </header>
+  <textarea id="tInput" placeholder="输入文字…" maxlength="120"></textarea>
+  <div class="dots" id="sheetDots"></div>
+  <div class="trow">
+    <span class="lbl">字体</span>
+    <button class="fontChip on" data-f="0" style="font-family:-apple-system,'PingFang SC',sans-serif">默认</button>
+    <button class="fontChip" data-f="1" style="font-family:Georgia,'Songti SC','SimSun',serif">衬线</button>
+    <button class="fontChip" data-f="2" style="font-family:'Yuanti SC','YouYuan','Comic Sans MS',cursive">圆润</button>
+    <button class="fontChip" data-f="3" style="font-family:'Xingkai SC','KaiTi','STKaiti',serif">手写</button>
+  </div>
+  <div class="toggleRow"><span>描边</span><div class="switch" id="sheetStroke"></div></div>
+</div>
+
+<div class="mask" id="alertMask" style="z-index:69"></div>
+<div id="alertBox">
+  <div class="card">
+    <div class="tt" id="alTitle"></div>
+    <div class="msg" id="alMsg" style="display:none"></div>
+    <button id="alCancel">取消</button>
+    <button id="alOk" class="dg"></button>
+  </div>
+</div>
+
+<div id="busy"><div class="spin"></div></div>
+<div id="toast"></div>
+<input type="file" id="fileInput" accept="image/*" hidden>
+
+<script>
+'use strict';
+/* ================= 基础引用 ================= */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const stage=$('#stage'), wrap=$('#wrap'), cv=$('#cv'), ctx=cv.getContext('2d');
+const textLayer=$('#textLayer'), warmLayer=$('#warmLayer');
+const cropLayer=$('#cropLayer'), cropBox=$('#cropBox'), cropShade=$('#cropShade');
+
+const BASE_MAX=2400;          // 基准分辨率（长边）
+const HIST_MAX=6;             // 历史栈深
+const FONTS=[
+  "-apple-system,'PingFang SC','Helvetica Neue',sans-serif",
+  "Georgia,'Songti SC','SimSun',serif",
+  "'Yuanti SC','YouYuan','Comic Sans MS',cursive",
+  "'Xingkai SC','KaiTi','STKaiti',serif"
+];
+const COLORS=['#FFFFFF','#000000','#FF453A','#FF9F0A','#FFD60A','#30D158','#0A84FF','#BF5AF2','#FF375F'];
+
+const S={
+  ready:false, mode:'none',
+  W:0,H:0,
+  hist:[], redo:[],
+  texts:[], sel:null, seq:1,
+  brushColor:'#FFFFFF',
+  retouchTool:'mosaic',
+  adj:{b:0,c:0,s:0,w:0}, adjSave:null, adjItem:'b',
+  filterIdx:0, filterSave:0, filterTint:null,
+  cropLock:0, cropOrigin:null,
+  effect:null,
+  drawing:false,
+};
+const V={s:1,tx:0,ty:0};               // 视图变换
+const ptrs=new Map();                   // 活跃指针
+let pinch=null, downInfo=null, lastTap=0, lastTapXY=[0,0], busyFlag=false;
+let thumbURL='';
+
+/* ================= 工具函数 ================= */
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const debounce=(fn,ms)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}};
+
+function toast(msg,ms=1900){
+  const t=$('#toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),ms);
+}
+function confirmBox(title,okText,onOk,destructive=true,msg=''){
+  $('#alTitle').textContent=title;
+  const m=$('#alMsg'); if(msg){m.textContent=msg;m.style.display='block'}else m.style.display='none';
+  const ok=$('#alOk'); ok.textContent=okText;
+  ok.className=destructive?'dg':'';
+  ok.onclick=()=>{hideAlert();onOk()};
+  $('#alCancel').onclick=hideAlert;
+  $('#alertBox').classList.add('show');
+}
+function hideAlert(){$('#alertBox').classList.remove('show')}
+function busy(on){busyFlag=on;$('#busy').classList.toggle('show',on)}
+
+function setView(s=1,tx=0,ty=0){
+  V.s=s;V.tx=tx;V.ty=ty;
+  wrap.style.transform=`translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${s})`;
+}
+function fitView(){setView()}
+
+/* 画布适配：显式计算显示尺寸（bottombar 高度随面板变化，CSS 无法可靠表达） */
+function layoutStage(){
+  if(!S.ready)return;
+  const pad=22;
+  const aw=Math.max(40,stage.clientWidth-pad), ah=Math.max(40,stage.clientHeight-pad);
+  const k=Math.min(aw/S.W,ah/S.H);
+  cv.style.width=Math.floor(S.W*k)+'px';
+  cv.style.height=Math.floor(S.H*k)+'px';
+}
+
+/* 屏幕 → 画布坐标 */
+function toCanvas(clientX,clientY){
+  const r=cv.getBoundingClientRect();
+  return {x:(clientX-r.left)/r.width*S.W, y:(clientY-r.top)/r.height*S.H};
+}
+const dispW=()=>cv.getBoundingClientRect().width;
+const dispH=()=>cv.getBoundingClientRect().height;
+
+/* ================= 历史 ================= */
+function pushHistory(){
+  const url=cv.toDataURL('image/png');
+  S.hist.push(url);
+  if(S.hist.length>HIST_MAX+1)S.hist.shift();
+  S.redo.length=0;
+  updateHistBtns();
+}
+function updateHistBtns(){
+  $('#btnUndo').disabled=S.hist.length<=1||busyFlag;
+  $('#btnRedo').disabled=S.redo.length===0||busyFlag;
+}
+function loadSnap(url){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{
+      S.W=img.naturalWidth;S.H=img.naturalHeight;
+      cv.width=S.W;cv.height=S.H;
+      ctx.drawImage(img,0,0);
+      S.effect=null;
+      fitView();layoutStage();refreshTexts();updateMeta();
+      res();
+    };
+    img.src=url;
+  });
+}
+/* 撤销/还原前退出预览模式，避免预览状态与画布内容错位 */
+function safeResetMode(){
+  if(['adjust','filter','crop'].includes(S.mode))setMode('none');
+}
+async function undo(){
+  if(S.hist.length<=1||busyFlag)return;
+  safeResetMode();
+  busy(true);
+  S.redo.push(S.hist.pop());
+  await loadSnap(S.hist[S.hist.length-1]);
+  busy(false);updateHistBtns();
+}
+async function redoDo(){
+  if(!S.redo.length||busyFlag)return;
+  safeResetMode();
+  busy(true);
+  const url=S.redo.pop();
+  S.hist.push(url);
+  await loadSnap(url);
+  busy(false);updateHistBtns();
+}
+
+/* ================= 导入 ================= */
+function openFile(){ $('#fileInput').click() }
+
+function handleFile(file){
+  if(!file||!file.type.startsWith('image/')){toast('请选择图片文件');return}
+  busy(true);
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=()=>{ startEdit(img); URL.revokeObjectURL(url); busy(false) };
+  img.onerror=()=>{URL.revokeObjectURL(url);busy(false);toast('图片读取失败')};
+  img.src=url;
+}
+
+function sampleImage(){
+  const w=1280,h=960,c=document.createElement('canvas');c.width=w;c.height=h;
+  const g=c.getContext('2d');
+  const sky=g.createLinearGradient(0,0,0,h*.72);
+  sky.addColorStop(0,'#0b2a5b');sky.addColorStop(.55,'#3f6fb5');sky.addColorStop(1,'#f0a56a');
+  g.fillStyle=sky;g.fillRect(0,0,w,h);
+  g.fillStyle='#ffd9a0';g.beginPath();g.arc(w*.68,h*.56,64,0,7);g.fill();
+  g.fillStyle='rgba(255,220,170,.25)';g.beginPath();g.arc(w*.68,h*.56,110,0,7);g.fill();
+  const mount=(x0,hh,col)=>{g.fillStyle=col;g.beginPath();g.moveTo(x0,h*.72);
+    g.lineTo(x0+w*.22,h*.72-hh);g.lineTo(x0+w*.46,h*.72);g.closePath();g.fill()};
+  mount(-80,300,'#2b3a55');mount(w*.30,240,'#37486a');mount(w*.55,340,'#22304a');
+  g.fillStyle='#141b2b';g.fillRect(0,h*.72,w,h*.28);
+  g.fillStyle='rgba(255,255,255,.85)';
+  g.font='600 34px -apple-system,PingFang SC,sans-serif';
+  g.fillText('示例图片 · Sample',44,h-96);
+  g.fillStyle='rgba(255,255,255,.45)';g.font='400 22px -apple-system,PingFang SC,sans-serif';
+  g.fillText('试试加文字、消除、滤镜与导出',44,h-58);
+  busy(true);
+  const img=new Image();
+  img.onload=()=>{startEdit(img);busy(false)};
+  img.src=c.toDataURL('image/jpeg',.92);
+}
+
+function startEdit(img){
+  const scale=Math.min(1,BASE_MAX/Math.max(img.naturalWidth,img.naturalHeight));
+  S.W=Math.round(img.naturalWidth*scale);S.H=Math.round(img.naturalHeight*scale);
+  cv.width=S.W;cv.height=S.H;
+  ctx.imageSmoothingQuality='high';
+  ctx.drawImage(img,0,0,S.W,S.H);
+  S.texts=[];S.sel=null;S.hist=[];S.redo=[];S.effect=null;
+  S.adj={b:0,c:0,s:0,w:0};S.filterIdx=0;S.filterTint=null;
+  renderAllTexts();setMode('none');updateWarm();
+  pushHistory();
+  S.ready=true;
+  document.body.classList.add('editing');
+  $('#welcome').classList.add('hide');
+  fitView();layoutStage();updateMeta();updateHistBtns();
+}
+function updateMeta(){ $('#imgMeta').textContent=`${S.W} × ${S.H}` }
+
+/* ================= 模式切换 ================= */
+const PANELS={brush:'#pBrush',retouch:'#pRetouch',text:'#pText',crop:'#pCrop',adjust:'#pAdjust',filter:'#pFilter'};
+function setMode(m){
+  if(!S.ready&&m!=='none')return;
+  // 离开旧模式清理
+  if(S.mode==='adjust'&&S.adjSave)cancelAdjust();
+  if(S.mode==='filter')cancelFilter();
+  if(S.mode==='crop')exitCrop(false);
+  deselectText();
+  S.mode=m;
+  $$('#mainTools .tool').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
+  $$('.toolPanel').forEach(p=>p.classList.remove('show'));
+  $('#mainTools').style.display=(m==='none')?'flex':'none';
+  if(PANELS[m])$(PANELS[m]).classList.add('show');
+  const hint=$('#hint');
+  if(m==='text'){hint.textContent='点按照片添加文字 · 拖动可平移';hint.style.display='block'}
+  else if(m==='retouch'){hint.textContent=S.retouchTool==='eraser'?'涂抹以消除内容':'涂抹以遮挡该区域';hint.style.display='block'}
+  else hint.style.display='none';
+  if(m==='crop')enterCrop();
+  if(m==='filter'){openFilter()}
+  if(m==='adjust'){openAdjust()}
+  if(m!=='crop'&&m!=='adjust'&&m!=='filter')fitView();
+  if(m==='brush'||m==='retouch')fitView();
+  requestAnimationFrame(layoutStage);
+}
+
+/* ================= 笔刷引擎（画笔 / 马赛克 / 模糊 / 消除） ================= */
+let effectC=null;
+function makeCanvas(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c}
+
+function downscaleBlur(src,strength){ // ctx.filter 不可用时的降采样近似
+  const k=1/strength, t=makeCanvas(Math.max(2,Math.round(S.W*k)),Math.max(2,Math.round(S.H*k)));
+  const tc=t.getContext('2d');tc.drawImage(src,0,0,t.width,t.height);
+  const o=makeCanvas(S.W,S.H);const oc=o.getContext('2d');
+  oc.imageSmoothingEnabled=true;oc.drawImage(t,0,0,S.W,S.H);
+  return o;
+}
+function buildEffect(type){
+  const W=S.W,H=S.H;
+  const e=makeCanvas(W,H), ec=e.getContext('2d');
+  if(type==='mosaic'){
+    const tw=Math.max(12,Math.round(W/46)), th=Math.max(9,Math.round(H/46));
+    const t=makeCanvas(tw,th);const tc=t.getContext('2d');
+    tc.drawImage(cv,0,0,tw,th);
+    ec.imageSmoothingEnabled=false;
+    ec.drawImage(t,0,0,W,H);
+  }else if(type==='blur'){
+    const r=Math.max(4,Math.round(W/48));
+    ec.drawImage(cv,0,0); // 打底防边缘透明
+    if(typeof ec.filter==='string'){
+      ec.filter=`blur(${r}px)`;ec.drawImage(cv,0,0);ec.filter='none';
+    }else{
+      ec.drawImage(downscaleBlur(cv,r/2),0,0);
+    }
+  }else if(type==='eraser'){
+    const tw=Math.max(8,Math.round(W/90)), th=Math.max(6,Math.round(H/90));
+    const t=makeCanvas(tw,th);const tc=t.getContext('2d');
+    tc.drawImage(cv,0,0,tw,th);
+    if(typeof ec.filter==='string'){
+      ec.filter=`blur(${Math.max(3,Math.round(W/160))}px)`;
+    }
+    ec.imageSmoothingEnabled=true;
+    ec.drawImage(t,0,0,W,H);
+    ec.filter='none';
+  }
+  return e;
+}
+function brushSizePx(v,min,max){return min+(max-min)*v/100}
+
+function strokeAt(p,last,type,size){
+  const e=S.effect||(S.effect=buildEffect(type));
+  ctx.save();
+  ctx.beginPath();
+  if(last&&(last.x!==p.x||last.y!==p.y)){
+    ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);
+    ctx.lineWidth=size*2;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();
+  }else{
+    ctx.arc(p.x,p.y,Math.max(1,size),0,7);
+  }
+  ctx.clip();
+  ctx.drawImage(e,0,0);
+  ctx.restore();
+}
+function drawBrushAt(p,last){
+  const v=+$('#brushSize').value;
+  const size=brushSizePx(v,S.W/220,S.W/14);
+  ctx.save();
+  ctx.strokeStyle=ctx.fillStyle=S.brushColor;
+  if(last&&(last.x!==p.x||last.y!==p.y)){
+    ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);
+    ctx.lineWidth=size*2;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();
+  }else{
+    ctx.beginPath();ctx.arc(p.x,p.y,Math.max(1,size),0,7);ctx.fill();
+  }
+  ctx.restore();
+}
+let lastPt=null, stroked=false;
+function beginStroke(p,type){
+  if(type==='brush'){drawBrushAt(p,null);stroked=true;return}
+  S.effect=null;S.effectType=type;
+  strokeAt(p,null,type,sizeOfTool());stroked=true;
+}
+function moveStroke(p,type){
+  if(type==='brush')drawBrushAt(p,lastPt);
+  else strokeAt(p,lastPt,type,sizeOfTool());
+}
+function sizeOfTool(){
+  if(S.mode==='brush')return brushSizePx(+$('#brushSize').value,S.W/220,S.W/14);
+  return brushSizePx(+$('#retouchSize').value,S.W/160,S.W/10);
+}
+function endStroke(){
+  if(stroked){pushHistory();stroked=false}
+  S.effect=null;lastPt=null;
+}
+
+/* ================= 裁剪 / 旋转 ================= */
+const CS={l:0,t:0,w:0,h:0};
+function enterCrop(){
+  fitView();layoutStage();
+  cropLayer.style.display='block';
+  if(S.cropLock>0){setCropRatio(S.cropLock);return}
+  const w=dispW(),h=dispH();
+  Object.assign(CS,{l:w*.07,t:h*.07,w:w*.86,h:h*.86});
+  layoutCrop();
+}
+function exitCrop(restore=true){
+  cropLayer.style.display='none';
+  if(restore)fitView();
+}
+function layoutCrop(){
+  cropBox.style.left=CS.l+'px';cropBox.style.top=CS.t+'px';
+  cropBox.style.width=CS.w+'px';cropBox.style.height=CS.h+'px';
+  const W=dispW(),H=dispH(),b=CS.t+CS.h,r=CS.l+CS.w;
+  const sh=(el,x,y,w,h)=>{el.style.left=x+'px';el.style.top=y+'px';el.style.width=Math.max(0,w)+'px';el.style.height=Math.max(0,h)+'px'};
+  sh($('#csT'),0,0,W,CS.t); sh($('#csB'),0,b,W,H-b);
+  sh($('#csL'),0,CS.t,CS.l,CS.h); sh($('#csR'),r,CS.t,W-r,CS.h);
+}
+function setCropRatio(r){ // r=w/h, 0=自由
+  S.cropLock=r;
+  if(!r)return;
+  const w=dispW(),h=dispH();
+  let cw=Math.min(w*.86,w),chh=cw/r;
+  if(chh>h*.86){chh=h*.86;cw=chh*r}
+  Object.assign(CS,{l:(w-cw)/2,t:(h-chh)/2,w:cw,h:chh});
+  layoutCrop();
+}
+/* 裁剪手柄拖动（含比例锁定） */
+$$('.ch').forEach(h=>{
+  h.addEventListener('pointerdown',e=>{
+    e.stopPropagation();e.preventDefault();
+    const key=h.dataset.h, o={...CS}, sx=e.clientX, sy=e.clientY;
+    const dw=dispW(),dh=dispH(),min=36,r=S.cropLock;
+    const mv=ev=>{
+      const dx=ev.clientX-sx, dy=ev.clientY-sy;
+      let {l,t,w,h:hh}={...o};
+      if(key.includes('w')){l=clamp(o.l+dx,0,o.l+o.w-min);w=o.l+o.w-l}
+      if(key.includes('e')){w=clamp(o.w+dx,min,dw-o.l)}
+      if(key.includes('n')){t=clamp(o.t+dy,0,o.t+o.h-min);hh=o.t+o.h-t}
+      if(key.includes('s')){hh=clamp(o.h+dy,min,dh-o.t)}
+      if(r){ // 锁定 w/h = r，出界时换主导轴反推
+        let W1=w,H1=w/r;
+        const maxW=key.includes('w')?o.l+o.w:dw-o.l;
+        const maxH=key.includes('n')?o.t+o.h:dh-o.t;
+        if(key==='n'||key==='s'){W1=hh*r;H1=hh;if(W1>maxW){W1=maxW;H1=W1/r}}
+        else{
+          if(H1>maxH){H1=maxH;W1=H1*r}
+          if(W1>maxW){W1=maxW;H1=W1/r}
+        }
+        W1=Math.max(min,W1);H1=Math.max(min,W1/r);
+        l=key.includes('e')?o.l:o.l+o.w-W1;
+        t=key.includes('s')?o.t:o.t+o.h-H1;
+        if(key==='n'||key==='s'){l=clamp(o.l+(o.w-W1)/2,0,Math.max(0,dw-W1))}
+        else if(key==='e'||key==='w'){t=clamp(o.t+(o.h-H1)/2,0,Math.max(0,dh-H1))}
+        w=W1;hh=H1;
+      }
+      CS.l=l;CS.t=t;CS.w=w;CS.h=hh;layoutCrop();
+    };
+    const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
+    addEventListener('pointermove',mv);addEventListener('pointerup',up);
+  });
+});
+/* 裁剪框整体拖动 */
+cropBox.addEventListener('pointerdown',e=>{
+  if(e.target.closest('.ch'))return;
+  e.stopPropagation();e.preventDefault();
+  const o={...CS},sx=e.clientX,sy=e.clientY,dw=dispW(),dh=dispH();
+  const mv=ev=>{
+    CS.l=clamp(o.l+ev.clientX-sx,0,dw-CS.w);
+    CS.t=clamp(o.t+ev.clientY-sy,0,dh-CS.h);
+    layoutCrop();
+  };
+  const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
+  addEventListener('pointermove',mv);addEventListener('pointerup',up);
+});
+function applyCrop(){
+  const sx=Math.round(CS.l/dispW()*S.W), sy=Math.round(CS.t/dispH()*S.H);
+  const sw=Math.round(CS.w/dispW()*S.W), sh=Math.round(CS.h/dispH()*S.H);
+  if(sw<8||sh<8){toast('裁剪区域太小');return}
+  const nc=makeCanvas(sw,sh);
+  nc.getContext('2d').drawImage(cv,sx,sy,sw,sh,0,0,sw,sh);
+  S.W=sw;S.H=sh;cv.width=sw;cv.height=sh;
+  ctx.drawImage(nc,0,0);
+  S.effect=null;pushHistory();
+  exitCrop();setMode('none');
+  toast('已裁剪');
+}
+/* 旋转 / 翻转（同步变换文字） */
+function rotate90(dir){ // 1=顺时针
+  const nc=makeCanvas(S.H,S.W),g=nc.getContext('2d');
+  if(dir>0){g.translate(S.H,0);g.rotate(Math.PI/2)}
+  else{g.translate(0,S.W);g.rotate(-Math.PI/2)}
+  g.drawImage(cv,0,0);
+  cv.width=S.H;cv.height=S.W;
+  [S.W,S.H]=[S.H,S.W];
+  ctx.drawImage(nc,0,0);
+  S.texts.forEach(t=>{
+    const nx=dir>0?1-t.y:t.y, ny=dir>0?t.x:1-t.x;
+    t.x=nx;t.y=ny;t.rot=(t.rot+90*dir)%360;
+  });
+  S.effect=null;pushHistory();refreshTexts();fitView();
+}
+function flip(axis){ // 'h'|'v'
+  const nc=makeCanvas(S.W,S.H),g=nc.getContext('2d');
+  if(axis==='h'){g.translate(S.W,0);g.scale(-1,1)}
+  else{g.translate(0,S.H);g.scale(1,-1)}
+  g.drawImage(cv,0,0);
+  ctx.clearRect(0,0,S.W,S.H);ctx.drawImage(nc,0,0);
+  S.texts.forEach(t=>{
+    if(axis==='h'){t.x=1-t.x}else{t.y=1-t.y}
+    t.rot=-t.rot;
+  });
+  S.effect=null;pushHistory();refreshTexts();
+}
+
+/* ================= 调整 ================= */
+function adjFilterCSS(a){
+  const f=[];
+  if(a.b)f.push(`brightness(${(1+a.b/160).toFixed(3)})`);
+  if(a.c)f.push(`contrast(${(1+a.c/150).toFixed(3)})`);
+  if(a.s)f.push(`saturate(${(1+a.s/100).toFixed(3)})`);
+  return f.join(' ')||'none';
+}
+function tintCSS(a){
+  if(!a.w)return null;
+  const al=Math.abs(a.w)/100*.3;
+  return a.w>0?`rgba(255,140,60,${al})`:`rgba(60,140,255,${al})`;
+}
+function updateWarm(extra){ // extra: 滤镜预览 tint
+  const t=tintCSS(S.adj);
+  let bg=t, op=0;
+  if(t){op=1}
+  if(extra){bg=extra;op=1}
+  warmLayer.style.background=bg||'transparent';
+  warmLayer.style.opacity=op;
+}
+function previewAdjust(){
+  cv.style.filter=adjFilterCSS(S.adj);
+  updateWarm(S.filterTint);
+  $('#adjSlider').value=S.adj[S.adjItem];
+  $('#adjVal').textContent=(S.adj[S.adjItem]>0?'+':'')+S.adj[S.adjItem];
+}
+function openAdjust(){
+  S.adjSave={...S.adj};
+  S.adjItem='b';
+  $$('#adjItems .hitem').forEach(b=>b.classList.toggle('on',b.dataset.k==='b'));
+  previewAdjust();
+}
+function cancelAdjust(){
+  if(!S.adjSave)return;
+  S.adj={...S.adjSave};S.adjSave=null;
+  cv.style.filter='none';updateWarm(S.filterTint);
+}
+function applyAdjust(){
+  const a=S.adj;
+  const has=a.b||a.c||a.s||a.w;
+  S.adjSave=null;
+  if(!has){cv.style.filter='none';updateWarm(null);return}
+  const nc=makeCanvas(S.W,S.H),g=nc.getContext('2d');
+  if(typeof g.filter==='string')g.filter=adjFilterCSS(a);
+  g.drawImage(cv,0,0);
+  g.filter='none';
+  const t=tintCSS(a);
+  if(t){
+    g.save();g.globalCompositeOperation='soft-light';
+    g.fillStyle=t;g.fillRect(0,0,S.W,S.H);g.restore();
+  }
+  cv.width=S.W;cv.height=S.H;
+  ctx.drawImage(nc,0,0);
+  S.adj={b:0,c:0,s:0,w:0};S.effect=null;
+  cv.style.filter='none';updateWarm(null);
+  pushHistory();
+  toast('已应用调整');
+}
+
+/* ================= 滤镜 ================= */
+const PRESETS=[
+  {name:'原图',f:'',t:null},
+  {name:'鲜明',f:'saturate(1.4) contrast(1.18) brightness(1.04)',t:null},
+  {name:'自然',f:'brightness(1.08) saturate(1.06) contrast(1.02)',t:null},
+  {name:'胶片',f:'contrast(1.16) saturate(.82) sepia(.14) brightness(1.03)',t:'rgba(255,190,120,.10)'},
+  {name:'黑白',f:'grayscale(1) contrast(1.12)',t:null},
+  {name:'黑金',f:'grayscale(1) sepia(.55) contrast(1.15) brightness(1.04)',t:null},
+  {name:'复古',f:'sepia(.42) saturate(.85) contrast(.96) brightness(1.05)',t:null},
+  {name:'冷调',f:'saturate(1.12) brightness(1.05) contrast(1.03)',t:'rgba(70,140,255,.14)'},
+  {name:'暖阳',f:'sepia(.22) saturate(1.22) brightness(1.05)',t:'rgba(255,150,60,.14)'},
+];
+function buildFilterThumbs(){
+  const box=$('#filterThumbs');box.innerHTML='';
+  PRESETS.forEach((p,i)=>{
+    const d=document.createElement('div');d.className='thumb'+(i===S.filterIdx?' on':'');
+    d.innerHTML=`<div class="im"><img src="${thumbURL}" style="filter:${p.f}">${p.t?`<div class="tt" style="background:${p.t}"></div>`:''}</div><span>${p.name}</span>`;
+    d.onclick=()=>{
+      S.filterIdx=i;
+      $$('#filterThumbs .thumb').forEach((el,j)=>el.classList.toggle('on',j===i));
+      cv.style.filter=p.f||'none';
+      S.filterTint=p.t;updateWarm(p.t);
+    };
+    box.appendChild(d);
+  });
+}
+function openFilter(){
+  S.filterSave=S.filterIdx;S.filterTint=null;
+  S.filterIdx=0;
+  if(!thumbURL){
+    const t=makeCanvas(160,160),g=t.getContext('2d');
+    const k=160/Math.max(S.W,S.H);
+    g.drawImage(cv,0,0,S.W*k,S.H*k);
+    thumbURL=t.toDataURL('image/jpeg',.8);
+  }
+  buildFilterThumbs();
+  cv.style.filter='none';updateWarm(null);
+}
+function cancelFilter(){
+  cv.style.filter='none';updateWarm(S.filterTint=null);
+  S.filterIdx=S.filterSave;
+}
+function applyFilter(){
+  const p=PRESETS[S.filterIdx];
+  S.filterTint=null;
+  if(!p.f&&!p.t){cv.style.filter='none';updateWarm(null);return}
+  const nc=makeCanvas(S.W,S.H),g=nc.getContext('2d');
+  if(typeof g.filter==='string')g.filter=p.f;
+  g.drawImage(cv,0,0);g.filter='none';
+  if(p.t){
+    g.save();g.globalCompositeOperation='soft-light';
+    g.fillStyle=p.t;g.fillRect(0,0,S.W,S.H);g.restore();
+  }
+  cv.width=S.W;cv.height=S.H;ctx.drawImage(nc,0,0);
+  S.effect=null;cv.style.filter='none';updateWarm(null);
+  thumbURL='';S.filterIdx=0;
+  pushHistory();toast(`已应用「${p.name}」`);
+}
+
+/* ================= 文字 ================= */
+function textShadowCSS(size,color){
+  const r=Math.max(1,size*.05), r2=r*2;
+  const dirs=[[r,0],[-r,0],[0,r],[0,-r],[r,r],[-r,-r],[r,-r],[-r,r],[r2,0],[-r2,0],[0,r2],[0,-r2]];
+  return dirs.map(([x,y])=>`0 0 ${x}px ${y}px ${color}`).join(',');
+}
+function makeTextObj(x,y){
+  return {id:S.seq++,text:'双击编辑',x,y,size:.08,color:'#FFFFFF',font:0,stroke:true,rot:0};
+}
+function renderTextObj(t){
+  let el=document.getElementById('tobj'+t.id);
+  if(!el){
+    el=document.createElement('div');
+    el.className='text-obj';el.id='tobj'+t.id;
+    el.innerHTML=`<div class="t-body"></div>
+      <button class="t-btn t-del"><svg width="16" height="16"><use href="#i-trash"/></svg></button>
+      <button class="t-btn t-resize"><svg width="15" height="15"><use href="#i-resize"/></svg></button>`;
+    textLayer.appendChild(el);
+    bindTextEvents(t,el);
+  }
+  const px=t.size*wrap.clientWidth;
+  el.style.left=t.x*100+'%';el.style.top=t.y*100+'%';
+  el.style.fontSize=px+'px';
+  el.style.fontFamily=FONTS[t.font];
+  el.style.transform=`translate(-50%,-50%) rotate(${t.rot}deg)`;
+  const body=el.querySelector('.t-body');
+  body.textContent=t.text;
+  body.style.color=t.color;
+  body.style.textShadow=t.stroke?textShadowCSS(px,t.color==='#000000'?'rgba(255,255,255,.9)':'rgba(0,0,0,.85)'):'none';
+  el.classList.toggle('sel',S.sel===t.id);
+}
+function renderAllTexts(){
+  textLayer.innerHTML='';
+  S.texts.forEach(renderTextObj);
+}
+function refreshTexts(){S.texts.forEach(renderTextObj)}
+function selectText(t){
+  S.sel=t?t.id:null;
+  S.texts.forEach(renderTextObj);
+  updateTextPanel();
+}
+function deselectText(){selectText(null)}
+function updateTextPanel(){
+  const has=!!S.sel;
+  $('#textCtlEmpty').style.display=has?'none':'flex';
+  $('#textCtlSel').style.display=has?'flex':'none';
+  $('#textMidBtns').style.display=has?'flex':'none';
+  if(has){
+    const t=S.texts.find(x=>x.id===S.sel);
+    $$('#textDots .dot').forEach(d=>d.classList.toggle('on',d.dataset.c===t.color));
+    $$('#pText .fontChip').forEach(c=>c.classList.toggle('on',+c.dataset.f===t.font));
+    $('#textStroke').classList.toggle('on',t.stroke);
+    $('#hint').style.display='none';
+  }else if(S.mode==='text'){
+    $('#hint').style.display='block';
+  }
+}
+function bindTextEvents(t,el){
+  // 拖动
+  el.addEventListener('pointerdown',e=>{
+    if(e.target.closest('.t-btn'))return;
+    e.stopPropagation();e.preventDefault();
+    selectText(t);
+    const r0=wrap.getBoundingClientRect();
+    const sx=e.clientX,sy=e.clientY,o={x:t.x,y:t.y};
+    const mv=ev=>{
+      t.x=clamp(o.x+(ev.clientX-sx)/r0.width,-.05,1.05);
+      t.y=clamp(o.y+(ev.clientY-sy)/r0.height,-.05,1.05);
+      renderTextObj(t);
+    };
+    const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
+    addEventListener('pointermove',mv);addEventListener('pointerup',up);
+  });
+  // 删除
+  el.querySelector('.t-del').addEventListener('pointerdown',e=>{
+    e.stopPropagation();
+    S.texts=S.texts.filter(x=>x!==t);
+    el.remove();S.sel=null;updateTextPanel();
+    toast('已删除文字');
+  });
+  // 缩放手柄
+  el.querySelector('.t-resize').addEventListener('pointerdown',e=>{
+    e.stopPropagation();e.preventDefault();
+    const r0=wrap.getBoundingClientRect();
+    const c={x:r0.left+t.x*r0.width,y:r0.top+t.y*r0.height};
+    const d0=Math.max(6,Math.hypot(e.clientX-c.x,e.clientY-c.y)),s0=t.size;
+    const mv=ev=>{
+      t.size=clamp(s0*Math.hypot(ev.clientX-c.x,ev.clientY-c.y)/d0,.015,.55);
+      renderTextObj(t);
+    };
+    const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up)};
+    addEventListener('pointermove',mv);addEventListener('pointerup',up);
+  });
+  // 双击编辑
+  let lastTapT=0;
+  el.addEventListener('pointerup',e=>{
+    if(e.target.closest('.t-btn'))return;
+    const now=Date.now();
+    if(now-lastTapT<320){openTextSheet(t);lastTapT=0}
+    else lastTapT=now;
+  });
+}
+/* 文字编辑 Sheet */
+let sheetTarget=null, sheetIsNew=false, sheetSave=null;
+function openTextSheet(t){
+  sheetTarget=t;sheetIsNew=!S.texts.includes(t);
+  sheetSave=sheetIsNew?null:{...t};
+  if(sheetIsNew)S.texts.push(t);
+  selectText(t);
+  $('#tInput').value=t.text;
+  $$('#sheetDots .dot').forEach(d=>d.classList.toggle('on',d.dataset.c===t.color));
+  $$('#textSheet .fontChip').forEach(c=>c.classList.toggle('on',+c.dataset.f===t.font));
+  $('#sheetStroke').classList.toggle('on',t.stroke);
+  $('#textSheet').classList.add('show');
+  setTimeout(()=>$('#tInput').focus(),120);
+}
+function closeTextSheet(commit){
+  if(!sheetTarget)return;
+  const t=sheetTarget;
+  if(!commit){
+    if(sheetIsNew){S.texts=S.texts.filter(x=>x!==t);const el=document.getElementById('tobj'+t.id);el&&el.remove()}
+    else if(sheetSave)Object.assign(t,sheetSave);
+  }else if(!t.text.trim()){
+    if(sheetIsNew){S.texts=S.texts.filter(x=>x!==t);const el=document.getElementById('tobj'+t.id);el&&el.remove()}
+  }
+  sheetTarget=null;sheetSave=null;
+  $('#textSheet').classList.remove('show');
+  renderAllTexts();updateTextPanel();
+  if(S.mode!=='text')setMode('none');
+}
+function addTextAt(xRatio,yRatio){
+  const t=makeTextObj(clamp(xRatio,.08,.92),clamp(yRatio,.1,.9));
+  renderTextObj(t);
+  openTextSheet(t);
+}
+
+/* ================= 导出 ================= */
+function composite(){
+  const out=makeCanvas(S.W,S.H),g=out.getContext('2d');
+  g.fillStyle='#000';g.fillRect(0,0,S.W,S.H);
+  g.drawImage(cv,0,0);
+  S.texts.forEach(t=>{
+    const fs=t.size*S.W;
+    g.save();
+    g.translate(t.x*S.W,t.y*S.H);
+    g.rotate(t.rot*Math.PI/180);
+    g.font=`600 ${fs}px ${FONTS[t.font]}`;
+    g.textAlign='center';g.textBaseline='middle';
+    const lines=String(t.text).split('\n');
+    const lh=fs*1.22, y0=-(lines.length-1)*lh/2;
+    if(t.stroke){
+      g.fillStyle=t.color==='#000000'?'rgba(255,255,255,.9)':'rgba(0,0,0,.85)';
+      const r=Math.max(1,fs*.05),r2=r*2;
+      lines.forEach((ln,i)=>{
+        const y=y0+i*lh;
+        [[r,0],[-r,0],[0,r],[0,-r],[r,r],[-r,-r],[r,-r],[-r,r],[r2,0],[-r2,0],[0,r2],[0,-r2]]
+          .forEach(([dx,dy])=>g.fillText(ln,dx,y+dy));
+      });
+    }
+    g.fillStyle=t.color;
+    lines.forEach((ln,i)=>g.fillText(ln,0,y0+i*lh));
+    g.restore();
+  });
+  return out;
+}
+function download(blob){
+  const a=document.createElement('a');
+  const d=new Date(),p=n=>String(n).padStart(2,'0');
+  a.download=`照片_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  a.href=URL.createObjectURL(blob);
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+function doExport(type){
+  busy(true);
+  composite().toBlob(b=>{
+    busy(false);
+    if(!b){toast('导出失败');return}
+    download(b);
+    hideExport();
+    toast(type==='png'?'已存储 PNG':'已存储 JPEG');
+  },type==='png'?'image/png':'image/jpeg',.92);
+}
+function showExport(){
+  if(!S.ready)return;
+  if(navigator.clipboard&&window.ClipboardItem)$('#expCopy').style.display='flex';
+  $('#exportMask').classList.add('show');$('#exportSheet').classList.add('show');
+}
+function hideExport(){$('#exportMask').classList.remove('show');$('#exportSheet').classList.remove('show')}
+
+/* ================= 指针交互（视图 / 绘制 / 轻点） ================= */
+stage.addEventListener('pointerdown',e=>{
+  if(!S.ready)return;
+  if(e.target.closest('.text-obj')||e.target.closest('.ch')||e.target.closest('#cropBox'))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  try{stage.setPointerCapture(e.pointerId)}catch(_){}
+  if(ptrs.size===2&&S.mode!=='crop'){
+    if(S.drawing)endStroke(),S.drawing=false;
+    const [a,b]=[...ptrs.values()];
+    pinch={d0:Math.hypot(a.x-b.x,a.y-b.y),s0:V.s,cx:(a.x+b.x)/2,cy:(a.y+b.y)/2,tx0:V.tx,ty0:V.ty};
+    downInfo=null;
+    return;
+  }
+  if(ptrs.size>1)return;
+  downInfo={x:e.clientX,y:e.clientY,t:Date.now(),moved:false,lx:e.clientX,ly:e.clientY};
+  if(S.mode==='brush'||S.mode==='retouch'){
+    if(!cropLayer.contains(e.target)){
+      S.drawing=true;lastPt=null;
+      beginStroke(toCanvas(e.clientX,e.clientY),S.mode==='brush'?'brush':S.retouchTool);
+    }
+  }
+});
+stage.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch){
+    const [a,b]=[...ptrs.values()];
+    const d=Math.hypot(a.x-b.x,a.y-b.y),cx=(a.x+b.x)/2,cy=(a.y+b.y)/2;
+    const s=clamp(pinch.s0*d/pinch.d0,.6,5);
+    setView(s,pinch.tx0+(cx-pinch.cx),pinch.ty0+(cy-pinch.cy));
+    return;
+  }
+  if(!downInfo)return;
+  const dx=e.clientX-downInfo.x, dy=e.clientY-downInfo.y;
+  if(Math.hypot(dx,dy)>8)downInfo.moved=true;
+  if(S.drawing){
+    const p=toCanvas(e.clientX,e.clientY);
+    moveStroke(p,S.mode==='brush'?'brush':S.retouchTool);
+    lastPt=p;
+  }else if(downInfo.moved&&(S.mode==='none'||S.mode==='text')&&!cropLayer.contains(e.target)){
+    setView(V.s,V.tx+e.clientX-downInfo.lx,V.ty+e.clientY-downInfo.ly);
+  }
+  downInfo.lx=e.clientX;downInfo.ly=e.clientY;
+});
+function stageUp(e){
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.delete(e.pointerId);
+  if(pinch){if(ptrs.size<2)pinch=null;downInfo=null;return}
+  if(S.drawing){S.drawing=false;endStroke();downInfo=null;return}
+  if(!downInfo)return;
+  const tap=!downInfo.moved&&Date.now()-downInfo.t<400;
+  const cx=downInfo.x,cy=downInfo.y;
+  downInfo=null;
+  if(!tap)return;
+  // 双击复位视图
+  const now=Date.now();
+  if(now-lastTap<320&&Math.hypot(cx-lastTapXY[0],cy-lastTapXY[1])<36){
+    lastTap=0;fitView();return;
+  }
+  lastTap=now;lastTapXY=[cx,cy];
+  if(S.mode==='text'){
+    const p=toCanvas(cx,cy);
+    addTextAt(p.x/S.W,p.y/S.H);
+  }else if(S.mode==='none'){
+    deselectText();
+  }
+}
+stage.addEventListener('pointerup',stageUp);
+stage.addEventListener('pointercancel',e=>{ptrs.delete(e.pointerId);pinch=null;if(S.drawing){S.drawing=false;endStroke()}downInfo=null});
+stage.addEventListener('wheel',e=>{
+  if(!S.ready)return;
+  e.preventDefault();
+  setView(clamp(V.s*(e.deltaY<0?1.12:.89),.6,5),V.tx,V.ty);
+},{passive:false});
+
+/* ================= 事件绑定 ================= */
+$('#btnPick').onclick=openFile;
+$('#dropZone').onclick=openFile;
+$('#btnSample').onclick=sampleImage;
+$('#fileInput').onchange=e=>{handleFile(e.target.files[0]);e.target.value=''};
+['dragover','dragleave','drop'].forEach(ev=>{
+  document.body.addEventListener(ev,e=>{
+    e.preventDefault();
+    const z=$('#dropZone');
+    if(ev==='dragover')z.classList.add('over');
+    else z.classList.remove('over');
+    if(ev==='drop')handleFile(e.dataTransfer.files[0]);
+  });
+});
+
+$('#btnUndo').onclick=undo;
+$('#btnRedo').onclick=redoDo;
+$('#btnDone').onclick=showExport;
+$('#btnRevert').onclick=()=>confirmBox('还原所有编辑？','还原',()=>{
+  safeResetMode();
+  if(S.hist[0])loadSnap(S.hist[0]).then(()=>{
+    S.hist=[S.hist[0]];S.redo=[];updateHistBtns();
+    toast('已还原');
+  });
+});
+
+$$('#mainTools .tool').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+$$('[data-exit]').forEach(b=>b.onclick=()=>setMode('none'));
+$$('[data-applycrop]').forEach(b=>b.onclick=applyCrop);
+$$('[data-cancelcrop]').forEach(b=>b.onclick=()=>{setMode('none')});
+$$('[data-applyadj]').forEach(b=>b.onclick=()=>{applyAdjust();setMode('none')});
+$$('[data-canceladj]').forEach(b=>b.onclick=()=>setMode('none'));
+$$('[data-applyfilter]').forEach(b=>b.onclick=()=>{applyFilter();setMode('none')});
+$$('[data-cancelfilter]').forEach(b=>b.onclick=()=>{cancelFilter();setMode('none')});
+
+/* 画笔面板 */
+const bd=$('#brushDots');
+COLORS.forEach((c,i)=>{
+  const d=document.createElement('button');d.className='dot'+(i===0?' on':'');d.style.background=c;d.dataset.c=c;
+  d.onclick=()=>{S.brushColor=c;$$('#brushDots .dot').forEach(x=>x.classList.toggle('on',x===d))};
+  bd.appendChild(d);
+});
+$('#brushSize').oninput=()=>{$('#brushSizeVal').textContent=$('#brushSize').value};
+
+/* 消除面板 */
+$$('#retouchSeg button').forEach(b=>b.onclick=()=>{
+  S.retouchTool=b.dataset.t;
+  $$('#retouchSeg button').forEach(x=>x.classList.toggle('on',x===b));
+  $('#retouchTip').textContent=S.retouchTool==='eraser'?'涂抹以消除内容':S.retouchTool==='blur'?'涂抹以模糊该区域':'涂抹以遮挡该区域';
+  $('#hint').textContent=$('#retouchTip').textContent;
+});
+$('#retouchSize').oninput=()=>{$('#retouchSizeVal').textContent=$('#retouchSize').value};
+
+/* 文字面板 */
+const td=$('#textDots');
+COLORS.forEach((c,i)=>{
+  const d=document.createElement('button');d.className='dot'+(i===0?' on':'');d.style.background=c;d.dataset.c=c;
+  d.onclick=()=>{
+    const t=S.texts.find(x=>x.id===S.sel);if(!t)return;
+    t.color=c;renderTextObj(t);
+    $$('#textDots .dot').forEach(x=>x.classList.toggle('on',x===d));
+  };
+  td.appendChild(d);
+});
+$$('#pText .fontChip').forEach(c=>c.onclick=()=>{
+  const t=S.texts.find(x=>x.id===S.sel);if(!t)return;
+  t.font=+c.dataset.f;renderTextObj(t);
+  $$('#pText .fontChip').forEach(x=>x.classList.toggle('on',x===c));
+});
+$('#textStroke').onclick=()=>{
+  const t=S.texts.find(x=>x.id===S.sel);if(!t)return;
+  t.stroke=!t.stroke;$('#textStroke').classList.toggle('on',t.stroke);renderTextObj(t);
+};
+$('#btnTextEdit').onclick=()=>{
+  const t=S.texts.find(x=>x.id===S.sel);if(t)openTextSheet(t);
+};
+$('#btnTextDel').onclick=()=>{
+  const t=S.texts.find(x=>x.id===S.sel);if(!t)return;
+  const el=document.getElementById('tobj'+t.id);el&&el.remove();
+  S.texts=S.texts.filter(x=>x!==t);S.sel=null;updateTextPanel();
+  toast('已删除文字');
+};
+
+/* 文字 Sheet */
+const sd=$('#sheetDots');
+COLORS.forEach((c,i)=>{
+  const d=document.createElement('button');d.className='dot'+(i===0?' on':'');d.style.background=c;d.dataset.c=c;
+  d.onclick=()=>{
+    if(!sheetTarget)return;
+    sheetTarget.color=c;renderTextObj(sheetTarget);
+    $$('#sheetDots .dot').forEach(x=>x.classList.toggle('on',x===d));
+  };
+  sd.appendChild(d);
+});
+$$('#textSheet .fontChip').forEach(c=>c.onclick=()=>{
+  if(!sheetTarget)return;
+  sheetTarget.font=+c.dataset.f;renderTextObj(sheetTarget);
+  $$('#textSheet .fontChip').forEach(x=>x.classList.toggle('on',x===c));
+});
+$('#sheetStroke').onclick=()=>{
+  if(!sheetTarget)return;
+  sheetTarget.stroke=!sheetTarget.stroke;
+  $('#sheetStroke').classList.toggle('on',sheetTarget.stroke);
+  renderTextObj(sheetTarget);
+};
+$('#tInput').addEventListener('input',()=>{
+  if(sheetTarget){sheetTarget.text=$('#tInput').value||' ';renderTextObj(sheetTarget)}
+});
+$('#tsDone').onclick=()=>closeTextSheet(true);
+$('#tsCancel').onclick=()=>closeTextSheet(false);
+
+/* 裁剪面板 */
+$$('#cropSeg button').forEach(b=>b.onclick=()=>{
+  $$('#cropSeg button').forEach(x=>x.classList.toggle('on',x===b));
+  setCropRatio(+b.dataset.r);
+});
+$$('#cropOps .hitem').forEach(b=>b.onclick=()=>{
+  const op=b.dataset.op;
+  if(op==='rotl')rotate90(-1);
+  if(op==='rotr')rotate90(1);
+  if(op==='fliph')flip('h');
+  if(op==='flipv')flip('v');
+  // 旋转后画布显示尺寸变化，重新放入裁剪框
+  requestAnimationFrame(()=>{
+    if(S.mode==='crop')enterCrop();
+  });
+});
+
+/* 调整面板 */
+$$('#adjItems .hitem').forEach(b=>b.onclick=()=>{
+  S.adjItem=b.dataset.k;
+  $$('#adjItems .hitem').forEach(x=>x.classList.toggle('on',x===b));
+  previewAdjust();
+});
+$('#adjSlider').addEventListener('input',()=>{
+  S.adj[S.adjItem]=+$('#adjSlider').value;
+  previewAdjust();
+});
+$('#btnAdjReset').onclick=()=>{
+  S.adj={b:0,c:0,s:0,w:0};previewAdjust();
+};
+
+/* 导出 Sheet */
+$('#expPng').onclick=()=>doExport('png');
+$('#expJpg').onclick=()=>doExport('jpg');
+$('#expCancel').onclick=hideExport;
+$('#exportMask').onclick=hideExport;
+$('#expCopy').onclick=()=>{
+  composite().toBlob(async b=>{
+    try{
+      await navigator.clipboard.write([new ClipboardItem({'image/png':b})]);
+      hideExport();toast('已拷贝到剪贴板');
+    }catch(err){toast('复制失败，请用「存储为」')}
+  },'image/png');
+};
+
+/* 视图刷新 */
+new ResizeObserver(debounce(()=>{layoutStage();refreshTexts()},60)).observe(stage);
+new ResizeObserver(debounce(()=>refreshTexts(),80)).observe(wrap);
+addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key==='z'){
+    e.preventDefault();e.shiftKey?redoDo():undo();
+  }
+});
+</script>
+</body>
+</html>
