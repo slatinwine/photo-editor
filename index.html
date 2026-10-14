@@ -587,6 +587,7 @@ const S={
   filterIdx:0, filterSave:0, filterTint:null,
   cropLock:0, cropOrigin:null,
   effect:null,
+  base:null,      // 原图备份（消除工具的填充源）
   drawing:false,
 };
 const V={s:1,tx:0,ty:0};               // 视图变换
@@ -728,6 +729,8 @@ function startEdit(img){
   cv.width=S.W;cv.height=S.H;
   ctx.imageSmoothingQuality='high';
   ctx.drawImage(img,0,0,S.W,S.H);
+  S.base=makeCanvas(S.W,S.H);
+  S.base.getContext('2d').drawImage(img,0,0,S.W,S.H);
   S.texts=[];S.sel=null;S.hist=[];S.redo=[];S.effect=null;
   S.adj={b:0,c:0,s:0,w:0};S.filterIdx=0;S.filterTint=null;
   renderAllTexts();setMode('none');updateWarm();
@@ -755,7 +758,7 @@ function setMode(m){
   if(PANELS[m])$(PANELS[m]).classList.add('show');
   const hint=$('#hint');
   if(m==='text'){hint.textContent='点按照片添加文字 · 拖动可平移';hint.style.display='block'}
-  else if(m==='retouch'){hint.textContent=S.retouchTool==='eraser'?'涂抹以消除内容':'涂抹以遮挡该区域';hint.style.display='block'}
+  else if(m==='retouch'){hint.textContent=S.retouchTool==='eraser'?'涂抹以擦除前景，自动填充原图背景':'涂抹以遮挡该区域';hint.style.display='block'}
   else hint.style.display='none';
   if(m==='crop')enterCrop();
   if(m==='filter'){openFilter()}
@@ -794,15 +797,9 @@ function buildEffect(type){
       ec.drawImage(downscaleBlur(cv,r/2),0,0);
     }
   }else if(type==='eraser'){
-    const tw=Math.max(8,Math.round(W/90)), th=Math.max(6,Math.round(H/90));
-    const t=makeCanvas(tw,th);const tc=t.getContext('2d');
-    tc.drawImage(cv,0,0,tw,th);
-    if(typeof ec.filter==='string'){
-      ec.filter=`blur(${Math.max(3,Math.round(W/160))}px)`;
-    }
-    ec.imageSmoothingEnabled=true;
-    ec.drawImage(t,0,0,W,H);
-    ec.filter='none';
+    // 消除：填充源为原图背景（擦掉前景，自动还原成原图内容）
+    if(S.base)ec.drawImage(S.base,0,0,W,H);
+    else ec.drawImage(cv,0,0);
   }
   return e;
 }
@@ -810,16 +807,20 @@ function brushSizePx(v,min,max){return min+(max-min)*v/100}
 
 function strokeAt(p,last,type,size){
   const e=S.effect||(S.effect=buildEffect(type));
+  // 用效果图作为笔刷纹理：图案锚定在画布原点，与 drawImage(e,0,0) 逐像素对齐。
+  // 旧实现先 stroke()（未设 strokeStyle，默认黑）再 clip() 线段路径——线段无填充面积，
+  // 裁剪区为空，效果图画不上，拖动时只留下黑色线条，这正是「擦除/模糊变黑」的根因。
+  const pat=ctx.createPattern(e,'no-repeat');
+  if(!pat)return;
   ctx.save();
   ctx.beginPath();
   if(last&&(last.x!==p.x||last.y!==p.y)){
-    ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);
-    ctx.lineWidth=size*2;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();
+    ctx.strokeStyle=pat;ctx.lineWidth=size*2;ctx.lineCap='round';ctx.lineJoin='round';
+    ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.stroke();
   }else{
-    ctx.arc(p.x,p.y,Math.max(1,size),0,7);
+    ctx.fillStyle=pat;
+    ctx.arc(p.x,p.y,Math.max(1,size),0,7);ctx.fill();
   }
-  ctx.clip();
-  ctx.drawImage(e,0,0);
   ctx.restore();
 }
 function drawBrushAt(p,last){
@@ -939,6 +940,7 @@ function applyCrop(){
   if(sw<8||sh<8){toast('裁剪区域太小');return}
   const nc=makeCanvas(sw,sh);
   nc.getContext('2d').drawImage(cv,sx,sy,sw,sh,0,0,sw,sh);
+  if(S.base){const nb=makeCanvas(sw,sh);nb.getContext('2d').drawImage(S.base,sx,sy,sw,sh,0,0,sw,sh);S.base=nb}
   S.W=sw;S.H=sh;cv.width=sw;cv.height=sh;
   ctx.drawImage(nc,0,0);
   S.effect=null;pushHistory();
@@ -951,6 +953,13 @@ function rotate90(dir){ // 1=顺时针
   if(dir>0){g.translate(S.H,0);g.rotate(Math.PI/2)}
   else{g.translate(0,S.W);g.rotate(-Math.PI/2)}
   g.drawImage(cv,0,0);
+  if(S.base){
+    const nb=makeCanvas(S.H,S.W),g2=nb.getContext('2d');
+    if(dir>0){g2.translate(S.H,0);g2.rotate(Math.PI/2)}
+    else{g2.translate(0,S.W);g2.rotate(-Math.PI/2)}
+    g2.drawImage(S.base,0,0);
+    S.base=nb;
+  }
   cv.width=S.H;cv.height=S.W;
   [S.W,S.H]=[S.H,S.W];
   ctx.drawImage(nc,0,0);
@@ -965,6 +974,13 @@ function flip(axis){ // 'h'|'v'
   if(axis==='h'){g.translate(S.W,0);g.scale(-1,1)}
   else{g.translate(0,S.H);g.scale(1,-1)}
   g.drawImage(cv,0,0);
+  if(S.base){
+    const nb=makeCanvas(S.W,S.H),g2=nb.getContext('2d');
+    if(axis==='h'){g2.translate(S.W,0);g2.scale(-1,1)}
+    else{g2.translate(0,S.H);g2.scale(1,-1)}
+    g2.drawImage(S.base,0,0);
+    S.base=nb;
+  }
   ctx.clearRect(0,0,S.W,S.H);ctx.drawImage(nc,0,0);
   S.texts.forEach(t=>{
     if(axis==='h'){t.x=1-t.x}else{t.y=1-t.y}
@@ -1405,7 +1421,7 @@ $('#brushSize').oninput=()=>{$('#brushSizeVal').textContent=$('#brushSize').valu
 $$('#retouchSeg button').forEach(b=>b.onclick=()=>{
   S.retouchTool=b.dataset.t;
   $$('#retouchSeg button').forEach(x=>x.classList.toggle('on',x===b));
-  $('#retouchTip').textContent=S.retouchTool==='eraser'?'涂抹以消除内容':S.retouchTool==='blur'?'涂抹以模糊该区域':'涂抹以遮挡该区域';
+  $('#retouchTip').textContent=S.retouchTool==='eraser'?'涂抹以擦除前景，自动填充原图背景':S.retouchTool==='blur'?'涂抹以模糊该区域':'涂抹以遮挡该区域';
   $('#hint').textContent=$('#retouchTip').textContent;
 });
 $('#retouchSize').oninput=()=>{$('#retouchSizeVal').textContent=$('#retouchSize').value};
