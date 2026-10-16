@@ -398,6 +398,9 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border:1px solid rgba
     <symbol id="i-resize" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
       <path d="M19.5 19.5 9 9M19.5 13.5v6h-6M14 19.5h5.5V14"/>
     </symbol>
+    <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6.5 3.5h11a1 1 0 0 1 1 1v16l-6.5-4.6-6.5 4.6v-16a1 1 0 0 1 1-1Z"/>
+    </symbol>
   </defs>
 </svg>
 
@@ -414,6 +417,14 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border:1px solid rgba
     </div>
     <button class="bigBtn" id="btnPick"><svg width="20" height="20"><use href="#i-image"/></svg>选择照片</button>
     <button class="ghostBtn" id="btnSample" style="margin-top:11px">使用示例图片</button>
+    <div id="draftRow" style="display:none;margin-top:11px;width:min(84vw,320px);gap:8px">
+      <button class="ghostBtn" id="btnResume" style="margin:0;width:auto;flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;font-size:14px">
+        <svg width="16" height="16"><use href="#i-save"/></svg>继续上次编辑<span id="draftTime" style="font-family:var(--mono);font-size:11px;color:var(--ink3)"></span>
+      </button>
+      <button class="ghostBtn" id="btnDraftDel" style="margin:0;width:46px;flex:none;display:flex;align-items:center;justify-content:center" title="丢弃暂存">
+        <svg width="17" height="17" style="color:var(--ink2)"><use href="#i-trash"/></svg>
+      </button>
+    </div>
     <div class="feat">
       <span><svg><use href="#i-text"/></svg>加文字</span>
       <span><svg><use href="#i-retouch"/></svg>消除/马赛克</span>
@@ -428,6 +439,7 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border:1px solid rgba
     <div id="topTitle">照片<small id="imgMeta"></small></div>
     <button class="tbtn icon" id="btnUndo" disabled><svg><use href="#i-undo"/></svg></button>
     <button class="tbtn icon" id="btnRedo" disabled><svg><use href="#i-redo"/></svg></button>
+    <button class="tbtn icon" id="btnDraft" title="暂存当前进度"><svg><use href="#i-save"/></svg></button>
     <button class="tbtn done" id="btnDone">完成</button>
   </header>
 
@@ -780,6 +792,14 @@ function sampleImage(){
   img.src=c.toDataURL('image/jpeg',.92);
 }
 
+function enterEditor(){
+  renderAllTexts();setMode('none');updateWarm();
+  pushHistory();
+  S.ready=true;
+  document.body.classList.add('editing');
+  $('#welcome').classList.add('hide');
+  fitView();layoutStage();updateMeta();updateHistBtns();
+}
 function startEdit(img){
   const scale=Math.min(1,BASE_MAX/Math.max(img.naturalWidth,img.naturalHeight));
   S.W=Math.round(img.naturalWidth*scale);S.H=Math.round(img.naturalHeight*scale);
@@ -790,12 +810,7 @@ function startEdit(img){
   S.base.getContext('2d').drawImage(img,0,0,S.W,S.H);
   S.texts=[];S.sel=null;S.hist=[];S.redo=[];S.effect=null;
   S.adj={b:0,c:0,s:0,w:0};S.filterIdx=0;S.filterTint=null;
-  renderAllTexts();setMode('none');updateWarm();
-  pushHistory();
-  S.ready=true;
-  document.body.classList.add('editing');
-  $('#welcome').classList.add('hide');
-  fitView();layoutStage();updateMeta();updateHistBtns();
+  enterEditor();
 }
 function updateMeta(){ $('#imgMeta').textContent=`${S.W} × ${S.H}` }
 
@@ -1355,6 +1370,77 @@ function showExport(){
 }
 function hideExport(){$('#exportMask').classList.remove('show');$('#exportSheet').classList.remove('show')}
 
+/* ================= 暂存（IndexedDB 草稿） ================= */
+const canvasToBlob=c=>new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('toBlob')),'image/png'));
+const blobToImg=b=>new Promise((res,rej)=>{
+  const u=URL.createObjectURL(b),i=new Image();
+  i.onload=()=>{URL.revokeObjectURL(u);res(i)};
+  i.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('decode'))};
+  i.src=u;
+});
+function idbDraft(op,val){
+  return new Promise((res,rej)=>{
+    const rq=indexedDB.open('photo-editor',1);
+    rq.onupgradeneeded=()=>rq.result.createObjectStore('drafts');
+    rq.onerror=()=>rej(rq.error);
+    rq.onsuccess=()=>{
+      const db=rq.result;
+      const tx=db.transaction('drafts',op==='get'?'readonly':'readwrite');
+      const r=op==='get'?tx.objectStore('drafts').get('current')
+        :op==='put'?tx.objectStore('drafts').put(val,'current')
+        :tx.objectStore('drafts').delete('current');
+      r.onsuccess=()=>res(r.result);
+      r.onerror=()=>rej(r.error);
+      tx.oncomplete=()=>db.close();
+    };
+  });
+}
+/* 暂存内容：当前画布像素 + 原图备份（消除工具填充源）+ 文字对象（仍可编辑）。
+   PNG 无损，避免反复暂存/恢复累积 JPEG 压缩噪声；撤销历史不入库，恢复后从当前点重新开始。 */
+function saveDraft(){
+  if(!S.ready||busyFlag)return;
+  safeResetMode(); // 退出调整/滤镜预览，保证存下的是已确认的画面
+  busy(true);
+  Promise.all([canvasToBlob(cv),S.base?canvasToBlob(S.base):Promise.resolve(null)])
+    .then(([c,b])=>idbDraft('put',{canvas:c,base:b,texts:S.texts,W:S.W,H:S.H,savedAt:Date.now()}))
+    .then(()=>{busy(false);toast('已暂存 · 欢迎页可继续编辑')})
+    .catch(()=>{busy(false);toast('暂存失败（存储不可用）')});
+}
+async function restoreDraft(){
+  let d;
+  try{d=await idbDraft('get')}catch(_){toast('读取暂存失败');return}
+  if(!d)return;
+  busy(true);
+  try{
+    const [ci,bi]=await Promise.all([blobToImg(d.canvas),d.base?blobToImg(d.base):Promise.resolve(null)]);
+    S.W=d.W;S.H=d.H;
+    cv.width=S.W;cv.height=S.H;
+    ctx.imageSmoothingQuality='high';
+    ctx.drawImage(ci,0,0);
+    S.base=bi?makeCanvas(S.W,S.H):null;
+    if(S.base)S.base.getContext('2d').drawImage(bi,0,0);
+    S.texts=Array.isArray(d.texts)?d.texts:[];
+    S.seq=S.texts.reduce((m,t)=>Math.max(m,t.id||0),0)+1; // 避免新文字 id 撞车
+    S.sel=null;S.hist=[];S.redo=[];S.effect=null;
+    S.adj={b:0,c:0,s:0,w:0};S.filterIdx=0;S.filterTint=null;
+    thumbURL='';
+    enterEditor();
+    busy(false);
+    toast('已恢复暂存');
+  }catch(_){busy(false);toast('暂存数据已损坏')}
+}
+function fmtDraftTime(ts){
+  const d=new Date(ts),p=n=>String(n).padStart(2,'0');
+  return `${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+async function refreshDraftRow(){
+  let d=null;
+  try{d=await idbDraft('get')}catch(_){}
+  if(!d){$('#draftRow').style.display='none';return}
+  $('#draftTime').textContent=fmtDraftTime(d.savedAt);
+  $('#draftRow').style.display='flex';
+}
+
 /* ================= 指针交互（视图 / 绘制 / 轻点） ================= */
 stage.addEventListener('pointerdown',e=>{
   if(!S.ready)return;
@@ -1454,6 +1540,15 @@ $('#btnRevert').onclick=()=>confirmBox('还原所有编辑？','还原',()=>{
     S.hist=[S.hist[0]];S.redo=[];updateHistBtns();
     toast('已还原');
   });
+});
+
+/* 暂存 */
+$('#btnDraft').onclick=saveDraft;
+$('#btnResume').onclick=restoreDraft;
+$('#btnDraftDel').onclick=()=>confirmBox('丢弃暂存？','丢弃',async()=>{
+  try{await idbDraft('del')}catch(_){}
+  refreshDraftRow();
+  toast('已丢弃暂存');
 });
 
 $$('#mainTools .tool').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
@@ -1589,6 +1684,7 @@ $('#expCopy').onclick=()=>{
 /* 视图刷新 */
 new ResizeObserver(debounce(()=>{layoutStage();refreshTexts()},60)).observe(stage);
 new ResizeObserver(debounce(()=>refreshTexts(),80)).observe(wrap);
+refreshDraftRow();
 addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key==='z'){
     e.preventDefault();e.shiftKey?redoDo():undo();
