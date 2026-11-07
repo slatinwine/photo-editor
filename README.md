@@ -21,3 +21,7 @@
 - 纯 HTML / CSS / JavaScript 单文件应用
 - Canvas 2D 全程本地处理（滤镜、裁剪、画笔、导出均基于 canvas）
 - 移动端触控友好，清水混凝土风格 UI
+
+## 关注公众号
+
+![公众号二维码](qrcode.jpg)
